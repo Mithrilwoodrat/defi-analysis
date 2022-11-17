@@ -24,10 +24,11 @@ const NonfungiblePositionManagerAdress = "0xc36442b4a4522e871399cd717abdd847ab11
 
 const NonfungiblePositionManagerABI = JSON.parse(getABI('./src/assets/uniV3/NonfungiblePositionManager.json'));
 
+//  nonce uint96, operator address, token0 address, token1 address, fee uint24, tickLower int24, tickUpper int24, liquidity uint128, feeGrowthInside0LastX128 uint256, feeGrowthInside1LastX128 uint256, tokensOwed0 uint128, tokensOwed1 uint128
 const getPosition = async (tokenId:number) => {
     const web3 = new Web3("https://rpc.ankr.com/eth");
     const NonfungiblePositionManager = new web3.eth.Contract(NonfungiblePositionManagerABI, NonfungiblePositionManagerAdress);
-    const position = NonfungiblePositionManager.methods.postions(tokenId).call();
+    const position = await NonfungiblePositionManager.methods.positions(tokenId).call();
     console.log(position);
 }
 

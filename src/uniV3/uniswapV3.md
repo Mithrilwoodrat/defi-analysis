@@ -1,3 +1,21 @@
+## Plans
+
+### Plan1
+
+1. get uniswap V3 LP NFT tokenIDs from chainbase
+2. query subgraph uniswap V3 node using tokenid
+
+### Plan2
+1. get uniswap V3 LP NFT tokenIDs from chainbase
+2. get position and pool info from NonfungiblePositionManager contract
+2. using @uniswap/v3-sdk to query pos.amount and reward info
+
+
+### Plan3
+1. query from chainbase datacloud to get all tx from account to NonfungiblePositionManager
+2. decode tx data using function sig and NonfungiblePositionManager abi
+3. get sum of mint() increaseLiquidity() amount and minus decreaseLiquidity() amount
+
 ## get all NonfungiblePositionManager function signature
 
 select * from (select substring(input,1,10) as sig from ethereum.transactions where from_address ="0x26fcbd3afebbe28d0a8684f790c48368d21665b5" and to_address = "0xc36442b4a4522e871399cd717abdd847ab11fe88") as A group by A.sig

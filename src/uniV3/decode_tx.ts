@@ -1,4 +1,4 @@
-import getABI from './utils/get_abi';
+import getABI from '../utils/get_abi';
 import Web3 from 'web3';
 const InputDataDecoder = require('ethereum-input-data-decoder');
 

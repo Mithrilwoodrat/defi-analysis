@@ -114,6 +114,7 @@ export class UniswapV3PositionBuilder {
         const pool = new Pool(t0, t1, feeBips, slot.sqrtPriceX96.toString(), liquidity.toString(), Number(slot.tick));
         const pos = new Position({ pool, liquidity: position.liquidity.toString(), tickLower, tickUpper });
       
+        //https://sourcegraph.com/github.com/Uniswap/v3-sdk/-/blob/src/entities/position.ts?L68
         const token0BalanceRaw = pos.amount0.multiply(10 ** token0.decimals).toFixed(0);
         const token1BalanceRaw = pos.amount1.multiply(10 ** token1.decimals).toFixed(0);
         //return [token0BalanceRaw, token1BalanceRaw];

@@ -1,3 +1,6 @@
+## Resources
+ * https://uniswapv3book.com/
+
 ## Plans
 
 ### Plan1

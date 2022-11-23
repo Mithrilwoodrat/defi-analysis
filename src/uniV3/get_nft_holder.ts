@@ -4,7 +4,7 @@ require("dotenv").config();
 
 const APIKEY: string = process.env.ChainBaseAPI || '';
 
-const GetAccountNFTs = async (address: string, contract_address :string, page:number=1) => {
+export const GetAccountNFTs = async (address: string, contract_address :string, page:number=1) => {
     const requestUrl = `https://api.chainbase.online/v1/account/nfts?chain_id=1&address=${address}&contract_address=${contract_address}&page=${page}&limit=100`;
     let data:any = {
     };
@@ -24,7 +24,7 @@ const GetAccountNFTs = async (address: string, contract_address :string, page:nu
     return result;
 };
 
-const getAllResults = async(address: string, contract_address :string,) => {
+export const getAllResults = async(address: string, contract_address :string,) => {
     const result = await GetAccountNFTs(address, contract_address);
     const InitData= result.data
     const total = result.count;
@@ -54,4 +54,4 @@ const main = async () => {
     console.log(tokenIds);
 }
 
-main().then();
+//main().then();

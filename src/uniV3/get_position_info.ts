@@ -2,9 +2,10 @@ import getABI from '../utils/get_abi';
 import Web3 from 'web3';
 import { Token } from '@src/types/token';
 import { BigNumber } from 'ethers';
+import { utils } from 'ethers';
 import { Token as TokenWrapper } from '@uniswap/sdk-core';
 import { Pool, Position } from '@uniswap/v3-sdk';
-import { UniswapV3LiquidityPositionContractData, UniswapV3LiquiditySlotContractData } from './uniV3interface';
+import { UniswapV3LiquidityPositionContractData, UniswapV3LiquidityTickContractData, UniswapV3LiquiditySlotContractData } from './uniV3interface';
 
 const tokenIds = [
     362887, 358665, 335201, 321865, 310166, 310152, 308478,
@@ -31,6 +32,12 @@ const UniswapV3FactoryABI = JSON.parse(getABI('./src/assets/uniV3/UniswapV3Facto
 const NonfungiblePositionManagerABI = JSON.parse(getABI('./src/assets/uniV3/NonfungiblePositionManager.json'));
 const UniswapV3PoolABI = JSON.parse(getABI('./src/assets/uniV3/UniswapV3Pool.json'));
 const ERC20Abi = JSON.parse(getABI('./src/assets/erc20_abi.json'));
+
+
+const subIn256 = (x: BigNumber, y: BigNumber): BigNumber => {
+    const difference = x.sub(y);
+    return difference.lt(0) ? BigNumber.from(2).pow(256).add(difference) : difference;
+}
 
 export class UniswapV3PositionBuilder {
     private rpcURL = "https://rpc.ankr.com/eth";
@@ -91,37 +98,106 @@ export class UniswapV3PositionBuilder {
         return [positionLowerBound, positionUpperBound];
     };
 
-    async getSupplied ({
+    async getSupplied({
         position,
         slot,
         token0,
         token1,
         liquidity,
-      }: {
+    }: {
         position: UniswapV3LiquidityPositionContractData;
         slot: UniswapV3LiquiditySlotContractData;
         token0: Token;
         token1: Token;
         liquidity: BigNumber;
-      }) {
+    }) {
         const tickLower = Number(position.tickLower);
         const tickUpper = Number(position.tickUpper);
         const feeBips = Number(position.fee);
-      
+
         const networkId = 1;
         const t0 = new TokenWrapper(networkId, token0.address, token0.decimals, token0.symbol);
         const t1 = new TokenWrapper(networkId, token1.address, token1.decimals, token1.symbol);
         const pool = new Pool(t0, t1, feeBips, slot.sqrtPriceX96.toString(), liquidity.toString(), Number(slot.tick));
         const pos = new Position({ pool, liquidity: position.liquidity.toString(), tickLower, tickUpper });
-      
+
         //https://sourcegraph.com/github.com/Uniswap/v3-sdk/-/blob/src/entities/position.ts?L68
         const token0BalanceRaw = pos.amount0.multiply(10 ** token0.decimals).toFixed(0);
         const token1BalanceRaw = pos.amount1.multiply(10 ** token1.decimals).toFixed(0);
         //return [token0BalanceRaw, token1BalanceRaw];
         return [pos.amount0.toFixed(8), pos.amount1.toFixed(8)];
-      };
-      
-    
+    };
+
+    static getCounterfactualFees(
+        liquidity: BigNumber,
+        tickCurrent: number,
+        tickLower: number,
+        tickUpper: number,
+        feeGrowthGlobal: BigNumber,
+        feeGrowthOutsideLower: BigNumber,
+        feeGrowthOutsideUpper: BigNumber,
+        feeGrowthInsideLast: BigNumber,
+    ) {
+        const feeGrowthBelow = BigNumber.from(tickCurrent).gte(tickLower)
+            ? BigNumber.from(feeGrowthOutsideLower)
+            : subIn256(BigNumber.from(feeGrowthGlobal), BigNumber.from(feeGrowthOutsideLower));
+        const feeGrowthAbove = BigNumber.from(tickCurrent).lt(tickUpper)
+            ? BigNumber.from(feeGrowthOutsideUpper)
+            : subIn256(BigNumber.from(feeGrowthGlobal), BigNumber.from(feeGrowthOutsideUpper));
+        const feeGrowthInside = subIn256(
+            subIn256(BigNumber.from(feeGrowthGlobal), BigNumber.from(feeGrowthBelow)),
+            BigNumber.from(feeGrowthAbove),
+        );
+
+        return subIn256(feeGrowthInside, BigNumber.from(feeGrowthInsideLast))
+            .mul(liquidity)
+            .div(BigNumber.from(2).pow(128))
+            .toString();
+    };
+
+    getClaimable({
+        position,
+        slot,
+        ticksLower,
+        ticksUpper,
+        feeGrowth0,
+        feeGrowth1,
+    }: {
+        position: UniswapV3LiquidityPositionContractData;
+        slot: UniswapV3LiquiditySlotContractData;
+        ticksLower: UniswapV3LiquidityTickContractData;
+        ticksUpper: UniswapV3LiquidityTickContractData;
+        feeGrowth0: BigNumber;
+        feeGrowth1: BigNumber;
+    }) :BigNumber[] {
+        const counterfactualFees0 = UniswapV3PositionBuilder.getCounterfactualFees(
+            position.liquidity,
+            slot.tick,
+            position.tickLower,
+            position.tickUpper,
+            feeGrowth0,
+            ticksLower.feeGrowthOutside0X128,
+            ticksUpper.feeGrowthOutside0X128,
+            position.feeGrowthInside0LastX128,
+        );
+
+        const counterfactualFees1 = UniswapV3PositionBuilder.getCounterfactualFees(
+            position.liquidity,
+            slot.tick,
+            position.tickLower,
+            position.tickUpper,
+            feeGrowth1,
+            ticksLower.feeGrowthOutside1X128,
+            ticksUpper.feeGrowthOutside1X128,
+            position.feeGrowthInside1LastX128,
+        );
+
+        const token0ClaimableBalanceRaw = BigNumber.from(position.tokensOwed0).add(counterfactualFees0);
+        const token1ClaimableBalanceRaw = BigNumber.from(position.tokensOwed1).add(counterfactualFees1);
+        return [token0ClaimableBalanceRaw, token1ClaimableBalanceRaw];
+    };
+
+
     async buildPositionInfo(tokenID: number) {
         const position = await this.getPosition(tokenID);
         const fee = position.fee;
@@ -132,14 +208,27 @@ export class UniswapV3PositionBuilder {
         const poolContract = new this.web3.eth.Contract(UniswapV3PoolABI, poolAddress);
         const token0Contract = new this.web3.eth.Contract(ERC20Abi, token0Address);
         const token1Contract = new this.web3.eth.Contract(ERC20Abi, token1Address);
+        const decimals = await token0Contract.methods.decimals().call();
+        let symbol = "";
+        try {
+            symbol = await token0Contract.methods.symbol().call();
+        } catch {
+
+        }
         const token0: Token = {
             address: token0Address,
-            symbol: await token0Contract.methods.symbol().call(),
-            decimals: Number(await token0Contract.methods.decimals().call())
+            symbol: symbol,
+            decimals: Number(decimals)
         };
+        symbol = "";
+        try {
+            symbol = await token1Contract.methods.symbol().call();
+        } catch {
+
+        }
         const token1: Token = {
             address: token1Address,
-            symbol: await token1Contract.methods.symbol().call(),
+            symbol: symbol,
             decimals: Number(await token1Contract.methods.decimals().call())
         };
         const [slot, liquidity, feeGrowth0, feeGrowth1, ticksLower, ticksUpper, reserveRaw0, reserveRaw1] =
@@ -153,11 +242,16 @@ export class UniswapV3PositionBuilder {
                 token0Contract.methods.balanceOf(poolAddress.toLowerCase()),
                 token1Contract.methods.balanceOf(poolAddress.toLowerCase()),
             ]);
-        const range = await this.getRange({position,slot,token0,token1,liquidity});
+        //const range = await this.getRange({ position, slot, token0, token1, liquidity });
         const suppliedBalances = await this.getSupplied({ position, slot, token0, token1, liquidity });
         //console.log(suppliedBalances);
-        console.log(`symbol:  ${token0.symbol}, balance: ${suppliedBalances[0]}`);
-        console.log(`symbol:  ${token1.symbol}, balance: ${suppliedBalances[1]}`);
+        console.log(`symbol:  ${token0.symbol}, balance: ${suppliedBalances[0].toString()}`);
+        console.log(`symbol:  ${token1.symbol}, balance: ${suppliedBalances[1].toString()}`);
+        const claimableBalances:BigNumber[] = this.getClaimable({ position, slot, ticksLower, ticksUpper, feeGrowth0, feeGrowth1 });
+        const reward0 = utils.formatUnits(claimableBalances[0], token0.decimals);
+        const reward1 = utils.formatUnits(claimableBalances[1], token1.decimals);
+        console.log(`symbol:  ${token0.symbol}, claimable: ${reward0.toString()}`);
+        console.log(`symbol:  ${token1.symbol}, claimable: ${reward1.toString()}`);
     }
 }
 
@@ -166,4 +260,4 @@ const main = async () => {
     const result = await service.buildPositionInfo(362887);
 }
 
-main().then();
+//main().then();
